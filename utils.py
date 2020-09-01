@@ -18,7 +18,6 @@ from PIL import Image
 
 
 
-
 def train_autoencoder(model, criterion, optimizer, dataloader, num_epochs):
   model.train()
   best_model_wts = deepcopy(model.state_dict())
@@ -47,6 +46,8 @@ def train_autoencoder(model, criterion, optimizer, dataloader, num_epochs):
 
 
 def train_classifier(classifier, autoencoder, criterion, optimizer, dataloaders, dataset_sizes, num_epochs):
+    
+  device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
   for param in autoencoder.parameters():
     param.requires_grad = False
@@ -60,9 +61,9 @@ def train_classifier(classifier, autoencoder, criterion, optimizer, dataloaders,
   for epoch in range(num_epochs):
     for phase in ['train', 'val']:
       if phase == 'train':
-        model.train()
+        classifier.train()
       else:
-        model.eval()
+        classifier.eval()
       
       running_loss = 0.0
       running_correct = 0
@@ -104,7 +105,65 @@ def train_classifier(classifier, autoencoder, criterion, optimizer, dataloaders,
   
 
 
-      
+def train_full_model(model, oprimizer, class_criterion, domain_criterion, dataloaders, num_epochs):
+
+  loss_history = {'train': [], 'val': []}
+  acc_history = {'train': [], 'val': []}
+
+  for epoch in range(num_epochs):
+    for phase in ['train', 'val']:
+        if phase == 'train':
+            model.train()
+        else:
+            model.eval()
+        epoch_class_loss = 0.
+        epoch_domain_loss = 0.
+        running_correct = 0
+        running_loss = 0.
+
+        for inputs, labels in dataloaders[phase]:
+            inputs = inputs.view(inputs.shape[0], -1)
+            inputs = Variable(inputs.to(device))
+            class_labels = Variable(labels.to(device))
+
+            #make domain binary labels
+            domain_labels = torch.zeros((len(inputs), 10)).long()
+            for i in range(len(labels.data)):
+                domain_labels.data[i][labels.data[i]] = 1
+            domain_labels = Variable(domain_labels.to(device))
+
+            optimizer.zero_grad()
+
+            class_output, domain_output = model(inputs)
+            _, class_preds = torch.max(class_output, 1)
+            class_loss = class_criterion(class_output, class_labels)
+            running_correct += torch.sum(class_labels == class_preds.data)          
+        #    domain_loss = domain_criterion(domain_output, domain_labels)
+       #     print(domain_output)
+            domain_loss = domain_labels * torch.log(domain_output)
+            where_nan = np.isnan(domain_loss.data)
+            domain_loss.data[where_nan] = 0
+            domain_loss = torch.sum(domain_loss)
+
+          #  epoch_class_loss += class_loss
+          #  epoch_domain_loss += domain_loss
+            loss = class_loss - domain_loss
+            running_loss += loss * inputs.size(0)
+            if phase == 'train':
+                loss.backward()
+                optimizer.step()
+
+        epoch_acc = running_correct.double() / len(dataloaders[phase].dataset)
+        epoch_loss = running_loss / len(dataloaders[phase].dataset)
+        acc_history[phase].append(epoch_acc)
+        loss_history[phase].append(epoch_loss)
+            
+        print('{} epoch [{}/{}], class acc: {:.4f}, loss: {:.4f}'.format(
+                  phase, epoch+1, num_epochs, epoch_acc, epoch_loss))
+    
+  return model, acc_history, loss_history
+
+        
         
   
 def attack(model, input, target, num_iter, alpha):
