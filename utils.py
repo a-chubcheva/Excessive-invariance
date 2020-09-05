@@ -19,6 +19,9 @@ from PIL import Image
 
 
 def train_autoencoder(model, criterion, optimizer, dataloader, num_epochs):
+    
+  device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+  
   model.train()
   best_model_wts = deepcopy(model.state_dict())
   best_loss = 10000.
@@ -105,10 +108,13 @@ def train_classifier(classifier, autoencoder, criterion, optimizer, dataloaders,
   
 
 
-def train_full_model(model, oprimizer, class_criterion, domain_criterion, dataloaders, num_epochs):
+def train_full_model(model, optimizer, class_criterion, domain_criterion, dataloaders, num_epochs):
+    
+  device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
   loss_history = {'train': [], 'val': []}
   acc_history = {'train': [], 'val': []}
+  acc_history_nuisance = {'train': [], 'val': []}
 
   for epoch in range(num_epochs):
     for phase in ['train', 'val']:
@@ -119,6 +125,7 @@ def train_full_model(model, oprimizer, class_criterion, domain_criterion, datalo
         epoch_class_loss = 0.
         epoch_domain_loss = 0.
         running_correct = 0
+        running_correct_nuisance = 0
         running_loss = 0.
 
         for inputs, labels in dataloaders[phase]:
@@ -138,12 +145,15 @@ def train_full_model(model, oprimizer, class_criterion, domain_criterion, datalo
             _, class_preds = torch.max(class_output, 1)
             class_loss = class_criterion(class_output, class_labels)
             running_correct += torch.sum(class_labels == class_preds.data)          
-        #    domain_loss = domain_criterion(domain_output, domain_labels)
-       #     print(domain_output)
+        
             domain_loss = domain_labels * torch.log(domain_output)
             where_nan = np.isnan(domain_loss.data)
             domain_loss.data[where_nan] = 0
             domain_loss = torch.sum(domain_loss)
+            
+            #check nuisance classifier
+            _, nuisance_preds = torch.max(domain_output, 1)
+            running_correct_nuisance += torch.sum(class_labels == nuisance_preds.data)  
 
           #  epoch_class_loss += class_loss
           #  epoch_domain_loss += domain_loss
@@ -154,29 +164,38 @@ def train_full_model(model, oprimizer, class_criterion, domain_criterion, datalo
                 optimizer.step()
 
         epoch_acc = running_correct.double() / len(dataloaders[phase].dataset)
+        epoch_acc_nuisance = running_correct_nuisance.double() / len(dataloaders[phase].dataset)
         epoch_loss = running_loss / len(dataloaders[phase].dataset)
         acc_history[phase].append(epoch_acc)
+        acc_history_nuisance[phase].append(epoch_acc_nuisance)
         loss_history[phase].append(epoch_loss)
             
         print('{} epoch [{}/{}], class acc: {:.4f}, loss: {:.4f}'.format(
                   phase, epoch+1, num_epochs, epoch_acc, epoch_loss))
     
-  return model, acc_history, loss_history
+  return model, acc_history, loss_history, acc_history_nuisance
 
         
         
   
-def attack(model, input, target, num_iter, alpha):
-  model.eval()
+def attack(autoencoder, classifier, full_model, input, target, num_iter, alpha, df=None):
   with torch.set_grad_enabled(True):
-    img = deepcopy(input)
-    output_targ = model(target)[:, :10]
+    input = torch.reshape(input, (1, 28*28)).to(device)
+    target = torch.reshape(target, (1, 28*28)).to(device)
+
+    first_flip = None 
+    first_flip_da = None   # da = domain adaptation
+    init_label = classifier.predict_by_image(input, autoencoder)
+    target_label = classifier.predict_by_image(target, autoencoder)
+    output_targ = autoencoder.encoder(target)[:, :10]
     best_loss = 10000.
+
+    img = deepcopy(input)
     best_img = deepcopy(img)
-    img = Variable(img, requires_grad=True)
+    img = Variable(img, requires_grad=True).to(device)
+
     for i in range(num_iter):
-      
-      output = model(img)[:, :10]
+      output = autoencoder.encoder(img)[:, :10]
       loss = torch.norm(output - output_targ, p=2)
       loss.backward(retain_graph=True)
 
@@ -184,9 +203,47 @@ def attack(model, input, target, num_iter, alpha):
         best_loss = loss.item()
         best_img = deepcopy(img)
       
-      #step
+      #gradien descent step
       img.data -= alpha * torch.sign(img.grad.data)
 
-  return best_img, best_loss
+      curr_label = classifier.predict_by_image(img, autoencoder)
+      curr_label_da = full_model.semantic_classifier.predict_by_image(img, autoencoder)
+      
+      if curr_label == target_label and first_flip is None:
+        first_flip = i
+      if curr_label_da == target_label and first_flip_da is None:
+        first_flip_da = i
+      '''
+      if curr_label != init_label and first_flip is None:
+        first_flip = i
+      if curr_label_da != init_label and first_flip_da is None:
+        first_flip_da = i
+      '''
+
+  if df is not None:
+      df = df.append({'input': init_label,
+                      'target': target_label,
+                      'flip': first_flip,
+                      'flip_da': first_flip_da},
+                      ignore_index=True)
+
+  return best_img, best_loss, df
   
 
+def to_jpg_and_back(img):
+  img = torch.reshape(img, (28, 28))
+  img = img.data.cpu().numpy()
+
+  #make jpg
+  img = img * 255.0
+  img = np.clip(img, 0, 255).astype(np.uint8)
+  img_pil = torchvision.transforms.ToPILImage()(img)
+  img_pil.save('img.jpg', 'JPEG')
+
+  #back to tensor
+  img_back = (np.asarray(Image.open('img.jpg')) / 255.0).astype(np.float32)
+  transform = transforms.ToTensor()
+  img_back = transform(img_back)
+  img_back = torch.reshape(img_back, (1, 28, 28))
+  
+  return img_back

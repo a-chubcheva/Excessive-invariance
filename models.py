@@ -107,3 +107,50 @@ class Full_model(nn.Module):
       return class_output, domain_output
       
 #-------------------------------------------------
+
+class VAE(nn.Module):
+  def __init__(self, input_size=28*28):
+    super(VAE, self).__init__()
+    self.encode = nn.Sequential(
+        nn.Linear(input_size, 1024),
+        nn.LeakyReLU(),
+        nn.Linear(1024, 512),
+        nn.LeakyReLU(),
+        nn.Linear(512, 128),
+        nn.LeakyReLU(),
+        nn.Linear(128, 64),
+        nn.LeakyReLU(),
+        nn.Linear(64, 64),
+        nn.LeakyReLU())
+
+    self.mean = nn.Linear(64, 64)
+    self.logvar = nn.Linear(64, 64)
+
+    self.decoder = nn.Sequential(
+        nn.Linear(64, 64),
+        nn.LeakyReLU(),
+        nn.Linear(64, 128),
+        nn.LeakyReLU(),
+        nn.Linear(128, 512),
+        nn.LeakyReLU(),
+        nn.Linear(512, 1024),
+        nn.LeakyReLU(),
+        nn.Linear(1024, input_size),   
+        nn.Sigmoid())
+    
+  def encoder(self, x):
+    hidden = self.encode(x)
+    mean = self.mean(hidden)
+    logvar = self.logvar(hidden)
+    x = self.reparametrize(mean, logvar)
+    return x
+    
+  def reparametrize(self, mean, logvar):
+    std = torch.exp(0.5*logvar)
+    eps = torch.randn_like(std)
+    return mean + eps * std
+
+  def forward(self, x):
+    x = self.encoder(x)
+    x = self.decoder(x)
+    return x
