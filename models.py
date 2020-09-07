@@ -111,7 +111,7 @@ class Full_model(nn.Module):
 class VAE(nn.Module):
   def __init__(self, input_size=28*28):
     super(VAE, self).__init__()
-    self.encode = nn.Sequential(
+    self.hidden = nn.Sequential(
         nn.Linear(input_size, 1024),
         nn.LeakyReLU(),
         nn.Linear(1024, 512),
@@ -139,7 +139,7 @@ class VAE(nn.Module):
         nn.Sigmoid())
     
   def encoder(self, x):
-    hidden = self.encode(x)
+    hidden = self.hidden(x)
     mean = self.mean(hidden)
     logvar = self.logvar(hidden)
     x = self.reparametrize(mean, logvar)
