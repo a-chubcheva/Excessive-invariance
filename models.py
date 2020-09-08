@@ -142,10 +142,8 @@ class VAE(nn.Module):
     hidden = self.hidden(x)
     mean = self.mean(hidden)
     logvar = self.logvar(hidden)
-    x = self.reparametrize(mean, logvar)
-    return x
     
-  def reparametrize(self, mean, logvar):
+    #random shift
     std = torch.exp(0.5*logvar)
     eps = torch.randn_like(std)
     return mean + eps * std
