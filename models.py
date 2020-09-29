@@ -88,6 +88,7 @@ class Full_model(nn.Module):
   def __init__(self):
       super(Full_model, self).__init__()
       self.autoencoder = Autoencoder()
+      self.is_vae = False
 
       self.semantic_classifier = Classifier()
 
@@ -97,7 +98,10 @@ class Full_model(nn.Module):
           nn.Linear(32, 10))
       
   def forward(self, img):
-      logits = self.autoencoder.encoder(img)
+      if self.is_vae:
+          logits, _, _ = self.autoencoder.encoder(img)
+      else:
+          logits = self.autoencoder.encoder(img)
       semantic = logits[:, :10]
       nuisance = logits[:, 10:]
       nuisance = Reversal_layer.apply(nuisance)
@@ -116,7 +120,11 @@ class VAE(nn.Module):
         nn.LeakyReLU(),
         nn.Linear(1024, 512),
         nn.LeakyReLU(),
-        nn.Linear(512, 128),
+        nn.Linear(512, 256),
+        nn.LeakyReLU(),
+        nn.Linear(256, 256),
+        nn.LeakyReLU(),
+        nn.Linear(256, 128),
         nn.LeakyReLU(),
         nn.Linear(128, 64),
         nn.LeakyReLU(),
@@ -146,6 +154,47 @@ class VAE(nn.Module):
     #random shift
     std = torch.exp(0.5*logvar)
     eps = torch.randn_like(std)
+    return mean + eps * std, mean, logvar
+
+  def forward(self, x):
+    x, mean, logvar = self.encoder(x)
+    x = self.decoder(x)
+    return x, mean, logvar
+
+
+# ---------------------------------------------
+class quasi_VAE(nn.Module):
+  def __init__(self, input_size=28*28):
+    super(quasi_VAE, self).__init__()
+    self.hidden = nn.Sequential(
+        nn.Linear(input_size, 1024),
+        nn.LeakyReLU(),
+        nn.Linear(1024, 512),
+        nn.LeakyReLU(),
+        nn.Linear(512, 128),
+        nn.LeakyReLU(),
+        nn.Linear(128, 64),
+        nn.LeakyReLU(),
+        nn.Linear(64, 64),
+        nn.LeakyReLU())
+
+    self.decoder = nn.Sequential(
+        nn.Linear(64, 64),
+        nn.LeakyReLU(),
+        nn.Linear(64, 128),
+        nn.LeakyReLU(),
+        nn.Linear(128, 512),
+        nn.LeakyReLU(),
+        nn.Linear(512, 1024),
+        nn.LeakyReLU(),
+        nn.Linear(1024, input_size),   
+        nn.Sigmoid())
+    
+  def encoder(self, x, eps=0.1):
+    mean = self.hidden(x)
+    
+    #random shift
+    std = torch.randn_like(mean)
     return mean + eps * std
 
   def forward(self, x):

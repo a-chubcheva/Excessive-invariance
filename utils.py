@@ -48,7 +48,7 @@ def train_autoencoder(model, criterion, optimizer, dataloader, num_epochs):
   
 
 
-def train_classifier(classifier, autoencoder, criterion, optimizer, dataloaders, dataset_sizes, num_epochs):
+def train_classifier(classifier, autoencoder, criterion, optimizer, dataloaders, dataset_sizes, num_epochs, is_vae=False):
     
   device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -77,7 +77,10 @@ def train_classifier(classifier, autoencoder, criterion, optimizer, dataloaders,
         labels = Variable(labels.to(device))
         optimizer.zero_grad()
 
-        logits = autoencoder.encoder(inputs)
+        if is_vae:
+            logits, _, _ = autoencoder.encoder(inputs)
+        else: 
+            logits = autoencoder.encoder(inputs)
         semantic = logits[:, :10]
 
         outputs = classifier(semantic)
@@ -108,7 +111,7 @@ def train_classifier(classifier, autoencoder, criterion, optimizer, dataloaders,
   
 
 
-def train_full_model(model, optimizer, class_criterion, domain_criterion, dataloaders, num_epochs):
+def train_full_model(model, optimizer, class_criterion, domain_criterion, dataloaders, num_epochs, is_vae=False):
     
   device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -179,6 +182,8 @@ def train_full_model(model, optimizer, class_criterion, domain_criterion, datalo
         
   
 def attack(autoencoder, classifier, full_model, input, target, num_iter, alpha, df=None):
+  
+  device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
   with torch.set_grad_enabled(True):
     input = torch.reshape(input, (1, 28*28)).to(device)
     target = torch.reshape(target, (1, 28*28)).to(device)
