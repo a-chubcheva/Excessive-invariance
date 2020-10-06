@@ -61,14 +61,23 @@ class Classifier(nn.Module):
       # predict by semantic logits - size 10
       x = self.classifier(x)
       return x
+      
+    def predict(self, semantic):
+        output = self.classifier(semantic)
+        _, preds = torch.max(output, 1)
+        return preds.item()
+        
+    def predict_by_image(self, img, autoencoder ,is_vae=False):
+        # input is (28, 28) or (1, 28, 28) tensor
+        img = torch.reshape(img, (1, 28*28))
+        if is_vae:
+            _, logits, _ = autoencoder.encoder(img)
+            semantic = logits[:,:10]
+        else:
+            semantic = autoencoder.encoder(img)[:,:10]
+        return self.predict(semantic)
     
-    def predict_by_image(self, img, autoencoder):
-      # input is (28, 28) or (1, 28, 28) tensor
-      img = torch.reshape(img, (1, 28*28))
-      semantic = autoencoder.encoder(img)[:,:10]
-      output = self.classifier(semantic)
-      _, preds = torch.max(output, 1)
-      return preds.item()
+    
 
 
 #-------------------------------------------------
@@ -99,7 +108,8 @@ class Full_model(nn.Module):
       
   def forward(self, img):
       if self.is_vae:
-          logits, _, _ = self.autoencoder.encoder(img)
+          #logits, _, _ = self.autoencoder.encoder(img)
+          _, logits, _ = self.autoencoder.encoder(img)
       else:
           logits = self.autoencoder.encoder(img)
       semantic = logits[:, :10]
